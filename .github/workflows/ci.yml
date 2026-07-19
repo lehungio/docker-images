@@ -14,11 +14,13 @@ env:
   IMAGE_NAME: ${{ github.repository }}
   IMAGE_AUTOMATION_TEST: automation-test
   IMAGE_PHP: php-latest
+  IMAGE_PHP_STABLE: php-stable
   IMAGE_PHP_BETA: php-beta
   IMAGE_PUPPETEER: puppeteer-latest
   IMAGE_REDIS: redis-latest
   IMAGE_UBUNTU: ubuntu-latest
   DOCKERFILE_PHP: ./php/latest.Dockerfile
+  DOCKERFILE_PHP_STABLE: ./php/stable.Dockerfile
   DOCKERFILE_PHP_BETA: ./php/beta.Dockerfile
   DOCKERFILE_PUPPETEER: ./puppeteer/latest.Dockerfile
   DOCKERFILE_REDIS: ./database/redis/latest.Dockerfile
@@ -392,6 +394,66 @@ jobs:
         with:
           context: .
           file: ${{ env.DOCKERFILE_PHP }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+      - name: Generate artifact attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME}}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: false
+
+  # job build php stable manual
+  build-php-stable-manual:
+    name: '[Manual] Build PHP stable'
+    needs: manual
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: php-stable
+      run: docker build . --file ${{ env.DOCKERFILE_PHP_STABLE }} --tag "php-stable:$(date +%s)"
+
+  # job build php stable automation
+  # type=ref,enable=true,priority=600,prefix=${{ env.IMAGE_PHP_STABLE }}-,event=branch
+  # type=ref,enable=true,priority=600,prefix=${{ env.IMAGE_PHP_STABLE }}-,event=pr
+  build-php-stable:
+    name: '[Auto] Build PHP stable'
+    needs: [automation, filter]
+    runs-on: ubuntu-latest
+    environment: CI
+    permissions:
+      packages: write
+      contents: read
+      attestations: write
+      id-token: write
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v4
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Log in to the Container registry
+        uses: docker/login-action@65b78e6e13532edd9afa3aa52ac7964289d1a9c1
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract metadata (tags, labels) for Docker # https://github.com/docker/metadata-action
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,enable=true,value=${{ env.IMAGE_PHP_STABLE }}-${{ needs.filter.outputs.version }}
+      - name: Build and push Docker images
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ env.DOCKERFILE_PHP_STABLE }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
